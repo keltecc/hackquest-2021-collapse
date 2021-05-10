@@ -1,0 +1,8 @@
+version: '2.2'
+
+services:
+    collapse:
+        build: .
+        restart: on-failure
+        ports:
+            - 17171:31337
