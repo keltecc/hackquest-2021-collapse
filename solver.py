@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import json
 import math
 import string
@@ -9,16 +10,17 @@ import subprocess
 
 
 def interact_remote(payload, address):
-    output = ''
+    size = 1024
+    output = b''
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(3)
         sock.connect(address)
 
-        sock.sendall(payload)
+        sock.sendall(payload.encode())
         
         while True:
-            data = sock.recv(1024)
+            data = sock.recv(size)
 
             if len(data) <= 0:
                 break
@@ -29,9 +31,9 @@ def interact_remote(payload, address):
 
 
 def interact_local(payload):
-    filename = './deploy/service/ZN.Runner'
+    args = ['dotnet', './deploy/service/ZN.Runner.dll']
 
-    with subprocess.Popen([filename], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+    with subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
         stdout, _ = process.communicate(payload.encode())
         return stdout
 
@@ -152,17 +154,19 @@ def print_flag(flag):
 
 
 def main():
+    IP = sys.argv[1] if len(sys.argv) > 1 else '0.0.0.0'
+    PORT = 17171
+
     repeat = 1000
     alphabet = string.ascii_letters + string.digits + '{}_'
 
-    model = get_model(alphabet, repeat)
-    save_model(model)
-    return
+    # model = get_model(alphabet, repeat)
+    # save_model(model)
     model = load_model()
-    
-    write_flag('ZN{Qu4NtuM_H3ll0_w0RLD_2021}')
 
-    counters = calculate_counters(repeat, interact_local)
+    interact = lambda payload: interact_remote(payload, (IP, PORT))
+
+    counters = calculate_counters(repeat, interact)
     flag = try_recover_flag(model, counters)
     print_flag(flag)
 
