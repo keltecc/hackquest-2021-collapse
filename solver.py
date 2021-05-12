@@ -9,13 +9,17 @@ import socket
 import subprocess
 
 
-def interact_remote(payload, address):
+IP = sys.argv[1] if len(sys.argv) > 1 else '0.0.0.0'
+PORT = 17171
+
+
+def interact_remote(payload):
     size = 1024
     output = b''
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(3)
-        sock.connect(address)
+        sock.connect((IP, PORT))
 
         sock.sendall(payload.encode())
         
@@ -109,9 +113,7 @@ def load_model():
         return json.load(file)
         
 
-def counters_equal(counter1, counter2):
-    eps = 100
-
+def counters_equal(counter1, counter2, eps=100):
     for x, y in zip(counter1, counter2):
         if abs(x - y) > eps:
             return False
@@ -119,8 +121,8 @@ def counters_equal(counter1, counter2):
     return True
 
 
-def try_recover_flag(model, counters):
-    flag = []
+def get_possible_flags(model, counters):
+    possible_symbols = []
 
     for counter in counters:
         part = []
@@ -129,34 +131,23 @@ def try_recover_flag(model, counters):
             if counters_equal(model[symbol], counter):
                 part.append(symbol)
 
-        flag.append(part)
+        possible_symbols.append(part)
 
-    return flag
+    max_index = max(map(len, possible_symbols))
 
+    for index in range(max_index):
+        flag = ''
 
-def print_flag(flag):
-    index = 0
-
-    while True:
-        line = ''
-
-        for part in flag:
+        for part in possible_symbols:
             if len(part) > index:
-                line += part[index]
+                flag += part[index]
             else:
-                line += ' '
+                flag += part[0]
 
-        if set(line) == set(' '):
-            break
-
-        print(line)
-        index += 1
+        yield flag
 
 
 def main():
-    IP = sys.argv[1] if len(sys.argv) > 1 else '0.0.0.0'
-    PORT = 17171
-
     repeat = 1000
     alphabet = string.ascii_letters + string.digits + '{}_'
 
@@ -164,11 +155,10 @@ def main():
     # save_model(model)
     model = load_model()
 
-    interact = lambda payload: interact_remote(payload, (IP, PORT))
-
-    counters = calculate_counters(repeat, interact)
-    flag = try_recover_flag(model, counters)
-    print_flag(flag)
+    counters = calculate_counters(repeat, interact_remote)
+    
+    for flag in get_possible_flags(model, counters):
+        print(flag)
 
 
 if __name__ == '__main__':
