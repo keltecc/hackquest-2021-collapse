@@ -11,4 +11,4 @@ COPY ./service/ flag.txt /var/collapse/
 
 USER collapse
 
-ENTRYPOINT socat -t5 -T5 TCP-LISTEN:31337,reuseaddr,fork EXEC:"./ZN.Runner"
+ENTRYPOINT socat TCP-LISTEN:31337,reuseaddr,fork EXEC:"./ZN.Runner"
